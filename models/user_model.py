@@ -17,6 +17,7 @@ class UserModel:
             'demerit_points': 0,
             'is_blacklisted': False,
             'accident_detection_enabled': False,
+            'profile_completed': False,  # Track if profile is completed
             'created_at': get_ist_now_naive()
         }
         result = db.users.insert_one(user)
@@ -32,6 +33,10 @@ class UserModel:
 
     @staticmethod
     def update_profile(db, user_id, update_data):
+        # Check if profile is being completed (has name, date_of_birth, gender)
+        if 'name' in update_data and 'date_of_birth' in update_data and 'gender' in update_data:
+            if update_data.get('name') and update_data.get('date_of_birth') and update_data.get('gender'):
+                update_data['profile_completed'] = True
         db.users.update_one(
             {'_id': ObjectId(user_id)},
             {'$set': update_data}

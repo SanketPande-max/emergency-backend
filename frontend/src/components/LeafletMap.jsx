@@ -173,8 +173,8 @@ export function AdminMapView({ requests = [], height = 420, expandable }) {
                 <Popup>Ambulance: {r.assigned_ambulance.name}</Popup>
               </Marker>
             )}
-            {r.track?.length > 1 && <Polyline key={`t-${r.id}`} positions={r.track.map((t) => [t.lat, t.lng])} color={TRACK_COLOR} weight={3} opacity={0.8} />}
-            {routes[r.id]?.length > 1 && <Polyline key={`r-${r.id}`} positions={routes[r.id].map((p) => [p.lat, p.lng])} color={ROUTE_COLOR} weight={4} opacity={0.85} />}
+            {r.track?.length > 1 && <Polyline key={`t-${r.id}`} positions={r.track.map((t) => [t.lat, t.lng])} color={r.track_color || TRACK_COLOR} weight={3} opacity={0.8} />}
+            {routes[r.id]?.length > 1 && <Polyline key={`r-${r.id}`} positions={routes[r.id].map((p) => [p.lat, p.lng])} color={r.track_color || ROUTE_COLOR} weight={4} opacity={0.85} />}
           </div>
         ))}
       </MapContainer>

@@ -6,6 +6,7 @@ from models.user_model import UserModel
 from models.otp_model import OTPModel
 from utils.auth import role_required
 from utils.otp import send_otp_logic
+from utils.distance import find_nearest_ambulance
 from bson import ObjectId
 
 ambulance_bp = Blueprint('ambulance', __name__)
@@ -51,12 +52,22 @@ def verify_otp():
             identity=str(ambulance['_id']),
             additional_claims={'role': 'ambulance'}
         )
+        # Check if profile is completed
+        profile_completed = ambulance.get('profile_completed', False)
+        if not profile_completed:
+            # Check if profile has required fields
+            required_fields = ['name', 'age', 'date_of_birth', 'gender', 'vehicle_number', 'driving_license']
+            if all(ambulance.get(f) for f in required_fields):
+                profile_completed = True
+                AmbulanceModel.update_profile(ambulance_bp.db, str(ambulance['_id']), {'profile_completed': True})
+        
         return jsonify({
             'message': 'OTP verified successfully',
             'token': access_token,
             'ambulance_id': str(ambulance['_id']),
             'status': ambulance.get('status', 'inactive'),
-            'ambulance': _serialize_ambulance(ambulance)
+            'ambulance': _serialize_ambulance(ambulance),
+            'profile_completed': profile_completed
         }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -83,7 +94,7 @@ def update_profile():
         ambulance_id = get_jwt_identity()
         data = request.get_json() or {}
         update_data = {}
-        for key in ('name', 'age', 'date_of_birth', 'gender', 'vehicle_number', 'driving_license'):
+        for key in ('name', 'age', 'date_of_birth', 'gender', 'vehicle_number', 'driving_license', 'ambulance_type'):
             if key in data:
                 update_data[key] = data[key]
         if not update_data:
@@ -312,6 +323,79 @@ def complete_request(request_id):
         return jsonify({'message': 'Request completed successfully', 'request': completed}), 200
     except Exception as e:
         return jsonify({'error': f'Failed to complete request: {str(e)}'}), 500
+
+@ambulance_bp.route('/report-issue/<request_id>', methods=['POST'])
+@jwt_required()
+@role_required('ambulance')
+def report_issue(request_id):
+    """Report an issue (engine failure, puncture, etc.) and reassign to nearest available ambulance."""
+    try:
+        from utils.twilio_sms import send_sms, normalize_phone
+        
+        ambulance_id = get_jwt_identity()
+        data = request.get_json() or {}
+        issue_description = data.get('issue_description', 'Technical issue')
+        
+        # Validate request_id
+        try:
+            ObjectId(request_id)
+        except Exception:
+            return jsonify({'error': 'Invalid request ID format'}), 400
+        
+        req = RequestModel.find_by_id(ambulance_bp.db, request_id)
+        if not req:
+            return jsonify({'error': 'Request not found'}), 404
+        
+        if str(req.get('assigned_ambulance_id')) != ambulance_id:
+            return jsonify({'error': 'Unauthorized to report issue for this request'}), 403
+        
+        if req.get('status') in ['completed', 'fake']:
+            return jsonify({'error': 'Request already processed'}), 400
+        
+        # Unassign current ambulance
+        current_ambulance = AmbulanceModel.find_by_id(ambulance_bp.db, ambulance_id)
+        ambulance_bp.db.requests.update_one(
+            {'_id': ObjectId(request_id)},
+            {'$set': {
+                'assigned_ambulance_id': None,
+                'status': 'pending',
+                'assigned_at': None
+            }}
+        )
+        
+        # Set current ambulance to inactive temporarily
+        AmbulanceModel.update_status(ambulance_bp.db, ambulance_id, 'inactive')
+        
+        # Find nearest available ambulance
+        location = req.get('location', {})
+        lat = location.get('lat')
+        lng = location.get('lng')
+        requested_type = req.get('requested_ambulance_type', 'any')
+        
+        if lat and lng:
+            ambulances = AmbulanceModel.get_all_with_location(ambulance_bp.db, exclude_assigned=True)
+            # Exclude the current ambulance
+            ambulances = [a for a in ambulances if str(a['_id']) != ambulance_id]
+            nearest = find_nearest_ambulance(ambulances, lat, lng, prefer_active=True, requested_type=requested_type)
+            
+            if nearest:
+                RequestModel.assign_ambulance(ambulance_bp.db, request_id, str(nearest['_id']), send_notification=True)
+                return jsonify({
+                    'message': f'Issue reported. Request reassigned to nearest available ambulance.',
+                    'reassigned_ambulance_id': str(nearest['_id'])
+                }), 200
+            else:
+                return jsonify({
+                    'message': 'Issue reported. Request set to pending. No available ambulances at the moment.',
+                    'status': 'pending'
+                }), 200
+        else:
+            return jsonify({
+                'message': 'Issue reported. Request set to pending.',
+                'status': 'pending'
+            }), 200
+    except Exception as e:
+        return jsonify({'error': f'Failed to report issue: {str(e)}'}), 500
 
 @ambulance_bp.route('/report-fake/<request_id>', methods=['POST'])
 @jwt_required()

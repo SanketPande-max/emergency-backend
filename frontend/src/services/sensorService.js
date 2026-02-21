@@ -2,12 +2,24 @@
  * Sensor collection service for accident detection.
  * Collects: Geolocation (lat, lng, speed), DeviceMotion (accelerometer), DeviceMotion.rotationRate (gyroscope)
  * Sends to backend every SEND_INTERVAL_MS when enabled.
+ *
+ * SHAKE+STOP detection:
+ *  - Tracks recent accel magnitudes in a rolling window.
+ *  - If a strong shake is detected (accel magnitude spike), records the shake time.
+ *  - Once the phone becomes still (low accel) for STILL_DURATION_MS after a shake, sets shake_stop_detected=true.
+ *  - The flag is sent to the backend so the detector can trigger emergency.
  */
 import { submitSensorReading } from '../api/sensorApi';
 
-const SEND_INTERVAL_MS = 5000;
+const SEND_INTERVAL_MS = 3000;  // Send every 3s (was 5s) for faster detection
 const ACCEL_SCALE = 1;   // m/s²
 const GYRO_SCALE = 1;    // deg/s
+
+// Shake detection config
+const SHAKE_ACCEL_THRESHOLD = 15;     // m/s² magnitude to count as "shaking" (gravity ~9.8)
+const STILL_ACCEL_THRESHOLD = 12;     // m/s² magnitude below which phone is "still" (close to gravity only)
+const STILL_DURATION_MS = 10000;      // Phone must be still for 10 seconds after shake
+const MOTION_STALE_MS = 1500;         // If no motion event for 1.5s, assume phone is still
 
 let watchId = null;
 let motionHandler = null;
@@ -17,6 +29,14 @@ let lastSpeed = 0;
 let accel = { x: 0, y: 0, z: 0 };
 let gyro = { x: 0, y: 0, z: 0 };
 let enabled = false;
+
+// Shake+stop tracking
+let lastMotionEventTime = 0;
+let shakeDetectedTime = 0;       // timestamp when last strong shake was detected
+let stillStartTime = 0;          // timestamp when phone became still after shake
+let shakeStopDetected = false;   // true = shake happened, then phone was still for 10s
+let peakAccelMag = 0;            // peak accel magnitude in current window
+let recentAccelMags = [];        // rolling window of [timestamp, magnitude]
 
 function getSpeedFromPosition(prev, curr) {
   if (!prev?.coords || !curr?.coords) return null;
@@ -44,30 +64,116 @@ function onPosition(position) {
 }
 
 function onMotion(event) {
+  const now = Date.now();
+  lastMotionEventTime = now;
+
   const a = event.accelerationIncludingGravity || event.acceleration || {};
   accel.x = (a.x ?? 0) * ACCEL_SCALE;
   accel.y = (a.y ?? 0) * ACCEL_SCALE;
   accel.z = (a.z ?? 0) * ACCEL_SCALE;
+
   const r = event.rotationRate || {};
   gyro.x = (r.alpha ?? 0) * GYRO_SCALE;
   gyro.y = (r.beta ?? 0) * GYRO_SCALE;
   gyro.z = (r.gamma ?? 0) * GYRO_SCALE;
+
+  // Calculate current accel magnitude
+  const mag = Math.sqrt(accel.x ** 2 + accel.y ** 2 + accel.z ** 2);
+
+  // Track in rolling window (keep last 30s)
+  recentAccelMags.push([now, mag]);
+  recentAccelMags = recentAccelMags.filter(([t]) => now - t < 30000);
+
+  // Track peak
+  if (mag > peakAccelMag) peakAccelMag = mag;
+
+  // Detect shake: magnitude well above gravity (9.8 m/s²)
+  if (mag >= SHAKE_ACCEL_THRESHOLD) {
+    shakeDetectedTime = now;
+    stillStartTime = 0;  // reset still timer when shaking
+    shakeStopDetected = false;
+  }
+
+  // After a shake was detected, check if phone is now still
+  if (shakeDetectedTime > 0 && mag < STILL_ACCEL_THRESHOLD) {
+    if (stillStartTime === 0) {
+      stillStartTime = now;
+    }
+    // Check if still for STILL_DURATION_MS
+    if (now - stillStartTime >= STILL_DURATION_MS) {
+      shakeStopDetected = true;
+    }
+  } else if (shakeDetectedTime > 0 && mag >= STILL_ACCEL_THRESHOLD) {
+    // Phone is moving again — if it's a new shake, update shakeDetectedTime
+    stillStartTime = 0;
+    if (mag >= SHAKE_ACCEL_THRESHOLD) {
+      shakeStopDetected = false; // reset if shaking again
+    }
+  }
 }
 
-function sendReading() {
-  if (!enabled || !lastPosition) return;
-  const coords = lastPosition.coords;
-  submitSensorReading({
-    lat: coords.latitude,
-    lng: coords.longitude,
-    speed_kmh: lastSpeed || undefined,
+function getCurrentAccelGyro() {
+  const now = Date.now();
+  // If no motion event recently, phone is still — decay values toward gravity-only
+  if (lastMotionEventTime > 0 && (now - lastMotionEventTime) > MOTION_STALE_MS) {
+    // Phone is still — report near-zero accel (above gravity) and zero gyro
+    // Check if we had a shake before this stillness
+    if (shakeDetectedTime > 0 && stillStartTime === 0) {
+      stillStartTime = lastMotionEventTime;
+    }
+    if (shakeDetectedTime > 0 && stillStartTime > 0 && (now - stillStartTime) >= STILL_DURATION_MS) {
+      shakeStopDetected = true;
+    }
+    return {
+      accel_x: 0,
+      accel_y: 0,
+      accel_z: -9.8,  // gravity only = phone is still
+      gyro_x: 0,
+      gyro_y: 0,
+      gyro_z: 0,
+    };
+  }
+  return {
     accel_x: accel.x || undefined,
     accel_y: accel.y || undefined,
     accel_z: accel.z || undefined,
     gyro_x: gyro.x || undefined,
     gyro_y: gyro.y || undefined,
     gyro_z: gyro.z || undefined,
-  }).catch(() => {});
+  };
+}
+
+function sendReading() {
+  if (!enabled || !lastPosition) return;
+  const coords = lastPosition.coords;
+  const sensorValues = getCurrentAccelGyro();
+
+  const payload = {
+    lat: coords.latitude,
+    lng: coords.longitude,
+    speed_kmh: lastSpeed || 0,
+    ...sensorValues,
+    // Shake+stop flag for backend
+    shake_stop_detected: shakeStopDetected,
+    peak_accel: peakAccelMag,
+  };
+
+  submitSensorReading(payload)
+    .then((res) => {
+      // If emergency was created, reset shake tracking
+      if (res?.data?.accident_detected && res?.data?.request_id) {
+        resetShakeTracking();
+      }
+    })
+    .catch(() => {});
+}
+
+function resetShakeTracking() {
+  shakeDetectedTime = 0;
+  stillStartTime = 0;
+  shakeStopDetected = false;
+  peakAccelMag = 0;
+  recentAccelMags = [];
 }
 
 function start() {
@@ -75,6 +181,7 @@ function start() {
   enabled = true;
   lastPosition = null;
   lastSpeed = 0;
+  resetShakeTracking();
 
   if (navigator.geolocation) {
     watchId = navigator.geolocation.watchPosition(onPosition, () => {}, {
@@ -116,6 +223,7 @@ function stop() {
     clearInterval(sendTimer);
     sendTimer = null;
   }
+  resetShakeTracking();
 }
 
 export const sensorService = { start, stop, isEnabled: () => enabled };

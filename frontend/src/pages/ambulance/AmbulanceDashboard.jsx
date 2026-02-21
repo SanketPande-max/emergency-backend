@@ -21,16 +21,45 @@ export default function AmbulanceDashboard() {
   const fetchAssigned = async () => {
     try {
       const { data } = await ambulanceApi.getAssignedDetails();
+      const prevAssigned = assigned;
       setAssigned(data.assigned);
+      // Play alarm if new assignment received
+      if (!prevAssigned && data.assigned) {
+        playAlarmSound();
+      }
     } catch {
       setAssigned(null);
     }
+  };
+
+  const playAlarmSound = () => {
+    // Create a simple alarm sound using Web Audio API
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    oscillator.frequency.value = 800; // High frequency for alarm
+    oscillator.type = 'sine';
+    
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 3);
+    
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 3);
   };
 
   useEffect(() => {
     (async () => {
       try {
         const { data } = await ambulanceApi.getMe();
+        // Redirect to profile if not completed
+        if (!data.ambulance?.profile_completed) {
+          window.location.href = '/ambulance/profile';
+          return;
+        }
         setStatus(data.ambulance?.status || 'inactive');
         const loc = data.ambulance?.current_location;
         if (loc?.lat) setLocation({ lat: loc.lat, lng: loc.lng });
@@ -48,8 +77,9 @@ export default function AmbulanceDashboard() {
     else setRouteToHospital([]);
   }, [assigned?.status, assigned?.selected_hospital, assigned?.accident_location, location]);
 
+  // Auto-update location when active (not just when assigned)
   useEffect(() => {
-    if (!assigned || !navigator.geolocation) return;
+    if (status !== 'active' || !navigator.geolocation) return;
     const wid = navigator.geolocation.watchPosition(
       async (pos) => {
         const { latitude, longitude } = pos.coords;
@@ -62,7 +92,7 @@ export default function AmbulanceDashboard() {
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
     );
     return () => navigator.geolocation.clearWatch(wid);
-  }, [!!assigned]);
+  }, [status === 'active']);
 
   const tryGeolocation = () => {
     if (!navigator.geolocation) {
@@ -189,6 +219,35 @@ export default function AmbulanceDashboard() {
     }
   };
 
+  const handleReportIssue = async (requestId) => {
+    if (!requestId) {
+      setError('Invalid request ID');
+      return;
+    }
+    const issueDescription = prompt('Describe the issue (e.g., Engine failure, Puncture, etc.):');
+    if (!issueDescription) return;
+    
+    setLoading(true);
+    setError('');
+    try {
+      const response = await ambulanceApi.reportIssue(requestId, issueDescription);
+      if (response?.data?.message) {
+        alert(response.data.message);
+        setAssigned(null);
+        setStatus('inactive');
+        setShowHospitalPicker(false);
+        setError('');
+      } else {
+        throw new Error('Unexpected response from server');
+      }
+    } catch (e) {
+      const errorMsg = e.response?.data?.error || e.message || 'Failed to report issue';
+      setError(errorMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleReportFake = async (requestId) => {
     if (!requestId) {
       setError('Invalid request ID');
@@ -240,10 +299,7 @@ export default function AmbulanceDashboard() {
         <div className="status-row">
           <span className={`badge badge-${status}`}>{status}</span>
         </div>
-        <button className="btn btn-secondary" onClick={tryGeolocation} disabled={loading} style={{ marginBottom: '0.5rem' }}>
-          Update Location
-        </button>
-        {location && <p className="success-msg">Location: {location.lat.toFixed(4)}, {location.lng.toFixed(4)}</p>}
+        {location && <p className="success-msg">Location: {location.lat.toFixed(4)}, {location.lng.toFixed(4)} (Auto-updating)</p>}
         {showMapPicker && (
           <div className="map-picker-wrapper">
             <MapPicker initialCenter={location} onSelect={updateLocationWithCoords} height={260} />
@@ -269,6 +325,9 @@ export default function AmbulanceDashboard() {
             <>
               <button className="btn btn-primary" onClick={handleReachedUser} disabled={loading}>
                 Reached User – Select Hospital
+              </button>
+              <button className="btn btn-secondary" onClick={() => handleReportIssue(assigned.request_id)} disabled={loading} style={{ marginTop: '0.5rem', background: 'rgba(245, 158, 11, 0.1)', color: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.3)' }}>
+                ⚠️ Report Issue (Engine/Puncture)
               </button>
               <button className="btn btn-secondary" onClick={() => handleReportFake(assigned.request_id)} disabled={loading} style={{ marginTop: '0.5rem', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}>
                 ⚠️ Report Fake Request
