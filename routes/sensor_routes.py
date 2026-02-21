@@ -49,6 +49,7 @@ def init_sensor_routes(app, db):
 def submit_readings():
     """
     Submit sensor data. If accident detected, create request and assign ambulance (no verification calls).
+    Accepts shake_stop_detected flag from frontend for demo-mode detection.
     """
     try:
         user_id = get_jwt_identity()
@@ -65,6 +66,10 @@ def submit_readings():
         if lat is None or lng is None:
             return jsonify({'error': 'lat and lng required'}), 400
 
+        # Read frontend shake+stop flag
+        shake_stop_flag = bool(data.get('shake_stop_detected', False))
+        peak_accel = data.get('peak_accel', 0)
+
         SensorReadingModel.add(
             sensor_bp.db, user_id,
             lat=lat, lng=lng,
@@ -74,12 +79,19 @@ def submit_readings():
         )
 
         readings = SensorReadingModel.get_recent_for_user(sensor_bp.db, user_id)
-        if len(readings) < 1:
+        if len(readings) < 1 and not shake_stop_flag:
             return jsonify({'message': 'Reading saved', 'accident_detected': False}), 200
 
-        is_accident, prob = predict(readings)
+        # Pass shake_stop_flag to the predictor — this enables Path 0 (demo mode)
+        is_accident, prob = predict(readings, shake_stop_flag=shake_stop_flag)
         if not is_accident:
-            return jsonify({'message': 'Reading saved', 'accident_detected': False, 'probability': prob}), 200
+            return jsonify({
+                'message': 'Reading saved',
+                'accident_detected': False,
+                'probability': prob,
+                'shake_stop_flag': shake_stop_flag,
+                'readings_count': len(readings),
+            }), 200
 
         if UserModel.is_blacklisted(sensor_bp.db, user_id):
             return jsonify({'error': 'Account blacklisted'}), 403
@@ -98,8 +110,14 @@ def submit_readings():
 
         # No verification calls - directly create request and assign ambulance
         reasons = _get_trigger_reasons(readings)
+        if shake_stop_flag:
+            reasons.append('shake_stop_detected_by_frontend')
+
         request_id = RequestModel.create_request(sensor_bp.db, user_id, lat, lng, source='auto_detected')
         UserModel.update_location(sensor_bp.db, user_id, lat, lng)
+
+        # Clean up old sensor readings after emergency is created
+        SensorReadingModel.cleanup_old(sensor_bp.db, max_age_seconds=10)
 
         ambulances = AmbulanceModel.get_all_with_location(sensor_bp.db, exclude_assigned=True)
         nearest = find_nearest_ambulance(ambulances, lat, lng, prefer_active=True)
