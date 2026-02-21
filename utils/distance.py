@@ -20,16 +20,24 @@ def ambulances_sorted_by_distance(ambulances, target_lat, target_lng):
     out.sort(key=lambda x: x[0])
     return out
 
-def find_nearest_ambulance(ambulances, target_lat, target_lng, prefer_active=True):
+def find_nearest_ambulance(ambulances, target_lat, target_lng, prefer_active=True, requested_type=None):
     """
     Prefer nearest ACTIVE ambulance; if none active, return nearest any.
     ambulances: list of docs with current_location and status.
+    requested_type: 'any', 'basic_life', 'advance_life', 'icu_life' - filters by ambulance_type
     """
     sorted_list = ambulances_sorted_by_distance(ambulances, target_lat, target_lng)
     if not sorted_list:
         return None
+    
+    # Filter by requested type if specified
+    if requested_type and requested_type != 'any':
+        matching = [(d, amb) for d, amb in sorted_list if amb.get('ambulance_type') == requested_type]
+        if matching:
+            sorted_list = matching
+    
     if prefer_active:
         for _d, amb in sorted_list:
             if amb.get('status') == 'active':
                 return amb
-    return sorted_list[0][1]
+    return sorted_list[0][1] if sorted_list else None

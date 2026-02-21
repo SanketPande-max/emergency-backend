@@ -6,14 +6,6 @@ from models.ambulance_model import AmbulanceModel
 from models.otp_model import OTPModel
 from utils.auth import role_required
 from utils.otp import send_otp_logic
-from flask import Blueprint, request, jsonify
-from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
-from models.user_model import UserModel
-from models.request_model import RequestModel, LocationTrackModel
-from models.ambulance_model import AmbulanceModel
-from models.otp_model import OTPModel
-from utils.auth import role_required
-from utils.otp import send_otp_logic
 from utils.distance import find_nearest_ambulance
 from bson import ObjectId
 
@@ -160,16 +152,17 @@ def request_emergency():
         data = request.get_json() or {}
         lat = data.get('lat')
         lng = data.get('lng')
+        requested_ambulance_type = data.get('ambulance_type', 'any')  # any, basic_life, advance_life, icu_life
         if lat is None or lng is None:
             return jsonify({'error': 'lat and lng are required'}), 400
         lat, lng = float(lat), float(lng)
         UserModel.update_location(user_bp.db, user_id, lat, lng)
-        request_id = RequestModel.create_request(user_bp.db, user_id, lat, lng)
+        request_id = RequestModel.create_request(user_bp.db, user_id, lat, lng, source='manual', requested_ambulance_type=requested_ambulance_type)
         # Get ambulances with location, excluding those with active assignments
         ambulances = AmbulanceModel.get_all_with_location(user_bp.db, exclude_assigned=True)
-        nearest = find_nearest_ambulance(ambulances, lat, lng, prefer_active=True)
+        nearest = find_nearest_ambulance(ambulances, lat, lng, prefer_active=True, requested_type=requested_ambulance_type)
         if nearest:
-            RequestModel.assign_ambulance(user_bp.db, str(request_id), str(nearest['_id']))
+            RequestModel.assign_ambulance(user_bp.db, str(request_id), str(nearest['_id']), send_notification=True)
         req = RequestModel.find_by_id(user_bp.db, str(request_id))
         out = _serialize_request(req, user_bp.db)
         return jsonify({
@@ -339,13 +332,14 @@ def request_emergency():
         if lat is None or lng is None:
             return jsonify({'error': 'lat and lng are required'}), 400
         lat, lng = float(lat), float(lng)
+        requested_ambulance_type = data.get('ambulance_type', 'any')  # any, basic_life, advance_life, icu_life
         UserModel.update_location(user_bp.db, user_id, lat, lng)
-        request_id = RequestModel.create_request(user_bp.db, user_id, lat, lng)
+        request_id = RequestModel.create_request(user_bp.db, user_id, lat, lng, source='manual', requested_ambulance_type=requested_ambulance_type)
         # Get ambulances with location, excluding those with active assignments
         ambulances = AmbulanceModel.get_all_with_location(user_bp.db, exclude_assigned=True)
-        nearest = find_nearest_ambulance(ambulances, lat, lng, prefer_active=True)
+        nearest = find_nearest_ambulance(ambulances, lat, lng, prefer_active=True, requested_type=requested_ambulance_type)
         if nearest:
-            RequestModel.assign_ambulance(user_bp.db, str(request_id), str(nearest['_id']))
+            RequestModel.assign_ambulance(user_bp.db, str(request_id), str(nearest['_id']), send_notification=True)
         req = RequestModel.find_by_id(user_bp.db, str(request_id))
         out = _serialize_request(req, user_bp.db)
         return jsonify({

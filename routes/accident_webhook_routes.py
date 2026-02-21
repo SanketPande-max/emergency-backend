@@ -85,13 +85,13 @@ def _confirm_accident_and_dispatch(db, alert_id, alert):
     if lat is None or lng is None:
         return
 
-    request_id = RequestModel.create_request(db, user_id, lat, lng, source='auto_detected')
+    request_id = RequestModel.create_request(db, user_id, lat, lng, source='auto_detected', requested_ambulance_type='any')
     UserModel.update_location(db, user_id, lat, lng)
 
     ambulances = AmbulanceModel.get_all_with_location(db, exclude_assigned=True)
-    nearest = find_nearest_ambulance(ambulances, lat, lng, prefer_active=True)
+    nearest = find_nearest_ambulance(ambulances, lat, lng, prefer_active=True, requested_type='any')
     if nearest:
-        RequestModel.assign_ambulance(db, str(request_id), str(nearest['_id']))
+        RequestModel.assign_ambulance(db, str(request_id), str(nearest['_id']), send_notification=True)
 
     AccidentAlertModel.mark_confirmed(db, alert_id, str(request_id))
 

@@ -5,7 +5,7 @@ from utils.distance import haversine_distance
 
 class RequestModel:
     @staticmethod
-    def create_request(db, user_id, lat, lng, source='manual'):
+    def create_request(db, user_id, lat, lng, source='manual', requested_ambulance_type=None):
         """source: 'manual' (user tapped) or 'auto_detected' (accident detection)"""
         request = {
             'user_id': ObjectId(user_id),
@@ -14,6 +14,7 @@ class RequestModel:
             'assigned_ambulance_id': None,
             'assigned_at': None,
             'selected_hospital': None,
+            'requested_ambulance_type': requested_ambulance_type or 'any',  # any, basic_life, advance_life, icu_life
             'source': source,
             'created_at': get_ist_now_naive()
         }
@@ -25,7 +26,14 @@ class RequestModel:
         return db.requests.find_one({'_id': ObjectId(request_id)})
 
     @staticmethod
-    def assign_ambulance(db, request_id, ambulance_id):
+    def assign_ambulance(db, request_id, ambulance_id, send_notification=True):
+        """
+        Assign ambulance to request. If send_notification=True, sends SMS to ambulance driver.
+        Returns (request_doc, should_play_alarm) tuple.
+        """
+        from models.ambulance_model import AmbulanceModel
+        from utils.twilio_sms import send_sms, normalize_phone
+        
         now = get_ist_now_naive()
         db.requests.update_one(
             {'_id': ObjectId(request_id)},
@@ -35,7 +43,22 @@ class RequestModel:
                 'assigned_at': now
             }}
         )
-        return db.requests.find_one({'_id': ObjectId(request_id)})
+        req = db.requests.find_one({'_id': ObjectId(request_id)})
+        
+        # Send SMS notification to ambulance driver
+        if send_notification:
+            ambulance = AmbulanceModel.find_by_id(db, ambulance_id)
+            if ambulance and ambulance.get('phone'):
+                user = db.users.find_one({'_id': req['user_id']})
+                user_name = user.get('name', 'User') if user else 'User'
+                location = req.get('location', {})
+                lat = location.get('lat', 0)
+                lng = location.get('lng', 0)
+                message = f"🚨 NEW ASSIGNMENT: Emergency request from {user_name}. Location: {lat:.4f}, {lng:.4f}. Please proceed immediately!"
+                phone = normalize_phone(ambulance['phone'])
+                send_sms(phone, message)
+        
+        return req
 
     @staticmethod
     def complete_request(db, request_id):
@@ -97,7 +120,7 @@ class RequestModel:
     def assign_nearest_pending_to_ambulance(db, ambulance):
         """
         When an ambulance becomes active, assign it to the nearest pending request (if any).
-        Returns the assigned request document or None if nothing was assigned.
+        Matches ambulance type if requested. Returns the assigned request document or None if nothing was assigned.
         """
         if not ambulance:
             return None
@@ -106,12 +129,18 @@ class RequestModel:
         if amb_loc.get('lat') is None or amb_loc.get('lng') is None:
             return None
 
+        amb_type = ambulance.get('ambulance_type', 'any')
         pending_cursor = db.requests.find({'status': 'pending'}).sort('created_at', 1)
 
         nearest_req = None
         nearest_dist = None
 
         for req in pending_cursor:
+            # Check if ambulance type matches (or if request is 'any')
+            req_type = req.get('requested_ambulance_type', 'any')
+            if req_type != 'any' and amb_type != req_type and amb_type != 'any':
+                continue  # Type mismatch, skip
+            
             loc = (req.get('location') or {})
             if loc.get('lat') is None or loc.get('lng') is None:
                 continue
@@ -128,7 +157,7 @@ class RequestModel:
         if not nearest_req:
             return None
 
-        assigned = RequestModel.assign_ambulance(db, str(nearest_req['_id']), str(ambulance['_id']))
+        assigned = RequestModel.assign_ambulance(db, str(nearest_req['_id']), str(ambulance['_id']), send_notification=True)
         return assigned
 
 

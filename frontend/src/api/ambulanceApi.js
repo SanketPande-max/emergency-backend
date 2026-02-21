@@ -14,3 +14,4 @@ export const completeRequest = (requestId, lat, lng) => {
   return api.put(`/ambulance/complete-request/${requestId}`, body);
 };
 export const reportFake = (requestId) => api.post(`/ambulance/report-fake/${requestId}`);
+export const reportIssue = (requestId, issueDescription) => api.post(`/ambulance/report-issue/${requestId}`, { issue_description: issueDescription });

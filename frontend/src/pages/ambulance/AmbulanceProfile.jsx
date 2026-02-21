@@ -9,6 +9,7 @@ export default function AmbulanceProfile() {
   const [gender, setGender] = useState('');
   const [vehicleNumber, setVehicleNumber] = useState('');
   const [drivingLicense, setDrivingLicense] = useState('');
+  const [ambulanceType, setAmbulanceType] = useState('any');
   const [loading, setLoading] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [message, setMessage] = useState('');
@@ -24,6 +25,7 @@ export default function AmbulanceProfile() {
         setGender(a.gender || '');
         setVehicleNumber(a.vehicle_number || '');
         setDrivingLicense(a.driving_license || '');
+        setAmbulanceType(a.ambulance_type || 'any');
       } catch {
         setMessage('Could not load profile');
       } finally {
@@ -44,6 +46,7 @@ export default function AmbulanceProfile() {
         gender: gender || undefined,
         vehicle_number: vehicleNumber,
         driving_license: drivingLicense,
+        ambulance_type: ambulanceType,
       });
       setMessage('Profile updated successfully');
     } catch (err) {
@@ -91,6 +94,15 @@ export default function AmbulanceProfile() {
           <div className="form-group">
             <label>Driving License</label>
             <input value={drivingLicense} onChange={(e) => setDrivingLicense(e.target.value)} placeholder="License number" required />
+          </div>
+          <div className="form-group">
+            <label>Ambulance Type</label>
+            <select value={ambulanceType} onChange={(e) => setAmbulanceType(e.target.value)} className="form-control">
+              <option value="any">Any</option>
+              <option value="basic_life">Basic Life Support</option>
+              <option value="advance_life">Advance Life Support</option>
+              <option value="icu_life">ICU Life Support</option>
+            </select>
           </div>
           {message && <p className={message.includes('success') ? 'success-msg' : 'error-msg'}>{message}</p>}
           <button type="submit" className="btn btn-primary" disabled={loading}>{loading ? 'Saving…' : 'Save Profile'}</button>

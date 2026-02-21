@@ -5,7 +5,7 @@ from utils.time_utils import get_ist_now_naive
 class AmbulanceModel:
     @staticmethod
     def create_ambulance(db, phone, name=None, age=None, date_of_birth=None, gender=None,
-                        vehicle_number=None, driving_license=None):
+                        vehicle_number=None, driving_license=None, ambulance_type=None):
         """Create ambulance (OTP-only login; no password)."""
         ambulance = {
             'phone': phone,
@@ -15,9 +15,11 @@ class AmbulanceModel:
             'gender': gender,
             'vehicle_number': vehicle_number,
             'driving_license': driving_license,
+            'ambulance_type': ambulance_type or 'any',  # any, basic_life, advance_life, icu_life
             'status': 'inactive',
             'current_location': None,
             'current_location_updated_at': None,
+            'profile_completed': False,  # Track if profile is completed
             'created_at': get_ist_now_naive()
         }
         result = db.ambulances.insert_one(ambulance)
@@ -33,6 +35,10 @@ class AmbulanceModel:
 
     @staticmethod
     def update_profile(db, ambulance_id, update_data):
+        # Check if profile is being completed (has name, age, date_of_birth, gender, vehicle_number, driving_license)
+        required_fields = ['name', 'age', 'date_of_birth', 'gender', 'vehicle_number', 'driving_license']
+        if all(key in update_data and update_data.get(key) for key in required_fields):
+            update_data['profile_completed'] = True
         db.ambulances.update_one(
             {'_id': ObjectId(ambulance_id)},
             {'$set': update_data}

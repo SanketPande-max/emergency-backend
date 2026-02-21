@@ -77,11 +77,20 @@ def dashboard_map():
     """
     For central dashboard: each request as accident marker + assigned ambulance + ambulance track.
     Frontend can plot: accident at request.location, assigned ambulance, and track polyline.
+    Excludes completed requests from map (but they remain in list view).
     """
     try:
         requests = RequestModel.get_all_requests(admin_bp.db)
         out = []
+        # Color palette for different ambulances
+        colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
+        ambulance_colors = {}  # Map ambulance_id to color
+        
         for req in requests:
+            # Skip completed requests from map (but keep in list)
+            if req.get('status') == 'completed':
+                continue
+                
             r = {
                 'id': str(req['_id']),
                 'location': req.get('location'),
@@ -89,14 +98,22 @@ def dashboard_map():
                 'created_at': req.get('created_at').isoformat() if req.get('created_at') else None,
                 'assigned_ambulance_id': str(req['assigned_ambulance_id']) if req.get('assigned_ambulance_id') else None,
                 'assigned_ambulance': None,
-                'track': []
+                'track': [],
+                'track_color': None
             }
             r['selected_hospital'] = req.get('selected_hospital')
             if req.get('assigned_ambulance_id'):
-                amb = AmbulanceModel.find_by_id(admin_bp.db, str(req['assigned_ambulance_id']))
+                amb_id_str = str(req['assigned_ambulance_id'])
+                amb = AmbulanceModel.find_by_id(admin_bp.db, amb_id_str)
                 if amb:
+                    # Assign color to ambulance if not already assigned
+                    if amb_id_str not in ambulance_colors:
+                        color_idx = len(ambulance_colors) % len(colors)
+                        ambulance_colors[amb_id_str] = colors[color_idx]
+                    r['track_color'] = ambulance_colors[amb_id_str]
+                    
                     r['assigned_ambulance'] = {
-                        'id': str(amb['_id']),
+                        'id': amb_id_str,
                         'name': amb.get('name'),
                         'phone': amb.get('phone'),
                         'vehicle_number': amb.get('vehicle_number'),

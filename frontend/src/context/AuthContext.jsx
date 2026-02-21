@@ -25,6 +25,7 @@ export function AuthProvider({ children }) {
     localStorage.setItem('token', data.token);
     localStorage.setItem('role', 'user');
     localStorage.setItem('user_id', data.user_id);
+    localStorage.setItem('profile_completed', data.profile_completed ? 'true' : 'false');
     setRole('user');
     setUser({ ...data, role: 'user' });
   };
@@ -33,6 +34,7 @@ export function AuthProvider({ children }) {
     localStorage.setItem('token', data.token);
     localStorage.setItem('role', 'ambulance');
     localStorage.setItem('ambulance_id', data.ambulance_id);
+    localStorage.setItem('profile_completed', data.profile_completed ? 'true' : 'false');
     setRole('ambulance');
     setUser({ ...data, role: 'ambulance' });
   };

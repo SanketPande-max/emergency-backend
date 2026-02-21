@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import * as userApi from '../../api/userApi';
@@ -13,6 +13,7 @@ export default function UserDashboard() {
   const [error, setError] = useState('');
   const [showMapPicker, setShowMapPicker] = useState(false);
   const [userInfo, setUserInfo] = useState(null);
+  const [ambulanceType, setAmbulanceType] = useState('any');
 
   const fetchRequest = async () => {
     try {
@@ -29,11 +30,26 @@ export default function UserDashboard() {
     return () => clearInterval(id);
   }, []);
 
+  // Check for new assignment and play alarm
+  const prevRequestRef = useRef(null);
+  useEffect(() => {
+    if (request?.assigned_ambulance && request.status === 'assigned' && 
+        (!prevRequestRef.current?.assigned_ambulance || prevRequestRef.current?.status !== 'assigned')) {
+      playAlarmSound();
+    }
+    prevRequestRef.current = request;
+  }, [request]);
+
   useEffect(() => {
     (async () => {
       try {
         const { data } = await userApi.getMe();
         setUserInfo(data.user);
+        // Redirect to profile if not completed
+        if (!data.user?.profile_completed) {
+          window.location.href = '/user/profile';
+          return;
+        }
         if (data.user?.accident_detection_enabled) sensorService.start();
       } catch { /* ignore */ }
     })();
@@ -89,13 +105,36 @@ export default function UserDashboard() {
     setLoading(true);
     setError('');
     try {
-      const { data } = await userApi.requestEmergency(location.lat, location.lng);
+      const { data } = await userApi.requestEmergency(location.lat, location.lng, ambulanceType);
       setRequest(data.request);
+      // Play alarm sound if ambulance was assigned
+      if (data.request?.assigned_ambulance) {
+        playAlarmSound();
+      }
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to create request');
     } finally {
       setLoading(false);
     }
+  };
+
+  const playAlarmSound = () => {
+    // Create a simple alarm sound using Web Audio API
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    oscillator.frequency.value = 800; // High frequency for alarm
+    oscillator.type = 'sine';
+    
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 3);
+    
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 3);
   };
 
   return (
@@ -156,6 +195,15 @@ export default function UserDashboard() {
         <section className="card">
           <h2 className="card-title">Request Emergency</h2>
           <p className="card-desc">Set your location first, then request an ambulance.</p>
+          <div className="form-group" style={{ marginBottom: '1rem' }}>
+            <label>Ambulance Type</label>
+            <select value={ambulanceType} onChange={(e) => setAmbulanceType(e.target.value)} className="form-control">
+              <option value="any">Any</option>
+              <option value="basic_life">Basic Life Support</option>
+              <option value="advance_life">Advance Life Support</option>
+              <option value="icu_life">ICU Life Support</option>
+            </select>
+          </div>
           <button className="btn btn-primary" onClick={handleRequestEmergency} disabled={loading || !location || userInfo?.is_blacklisted}>
             {loading ? 'Requesting…' : userInfo?.is_blacklisted ? 'Account Blacklisted' : 'Request Emergency'}
           </button>
