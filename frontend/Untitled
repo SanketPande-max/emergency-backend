@@ -1,0 +1,5 @@
+VITE_API_URL=/api
+
+# Google Maps API key (enable Maps JavaScript API)
+# https://console.cloud.google.com/apis/library/maps-backend.googleapis.com
+VITE_GOOGLE_MAPS_API_KEY= AIzaSyD2zFfQVjXxR85H3CxObafNU5yibtCXYQs
