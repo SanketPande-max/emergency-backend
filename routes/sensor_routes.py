@@ -23,6 +23,8 @@ def _get_trigger_reasons(readings):
         return []
     speed_drop, _, accel_spike, gyro_spike, seconds_stopped, loc_change, speed_before, _ = feat
     reasons = []
+    if accel_spike >= 11 and seconds_stopped >= 10:
+        reasons.append('shake_and_stop')
     if gyro_spike >= 50 and accel_spike >= 10:
         reasons.append('high_impact')
     if speed_before >= 1 and speed_drop >= 1:
