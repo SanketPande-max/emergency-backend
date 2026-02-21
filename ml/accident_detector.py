@@ -26,15 +26,14 @@ def extract_features(readings):
     Extract feature vector from sensor readings window.
     readings: list of dicts with speed_kmh, accel_x/y/z, gyro_x/y/z, lat, lng, timestamp
     """
-    if not readings or len(readings) < 3:
+    if not readings:
         return None
 
     speeds = [r.get('speed_kmh') for r in readings if r.get('speed_kmh') is not None]
-    if not speeds:
-        return None
+    # For high-impact path (gyro+accel) we don't need speed; for full path we do
+    max_speed = max(speeds) if speeds else 0
+    min_speed = min(speeds) if speeds else 0
 
-    max_speed = max(speeds)
-    min_speed = min(speeds)
     speed_drop = max_speed - min_speed
 
     last_speeds = speeds[-3:] if len(speeds) >= 3 else speeds
@@ -88,20 +87,21 @@ def extract_features(readings):
 
 def rule_based_predict(readings):
     """
-    Manual/walking test thresholds (from real sensor data: speed~2.3, accel~8.8, gyro~42).
-    Triggers: some movement, speed drop, accel spike, gyro spike, stopped 10+ sec.
+    Manual/walking test. Path 1: high impact (gyro+accel very high) - triggers immediately.
+    Path 2: full conditions (speed drop, accel, gyro, stopped 10s).
     """
     feat = extract_features(readings)
     if feat is None:
         return False, 0.0
     speed_drop, _, accel_spike, gyro_spike, seconds_stopped, loc_change, speed_before, _ = feat
-    # Was moving (walking ~2+ km/h or more)
+    # Path 1: Very high gyro + accel = strong impact/rotation (e.g. gyro 412, accel 19)
+    if gyro_spike >= 50 and accel_spike >= 10:
+        return True, 0.9
+    # Path 2: Full conditions - movement, drop, spikes, stopped 10+ sec
     if speed_before < 1:
         return False, 0.0
-    # Conditions from manual test: speed drop, accel >= 5, gyro >= 15, stopped >= 10s
     if speed_drop >= 1 and accel_spike >= 5 and gyro_spike >= 15 and seconds_stopped >= 10:
         return True, 0.9
-    # Softer: high gyro + accel + stopped
     if gyro_spike >= 18 and accel_spike >= 5 and seconds_stopped >= 10 and loc_change < 30:
         return True, 0.75
     return False, 0.0
