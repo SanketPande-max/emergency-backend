@@ -23,6 +23,8 @@ def _get_trigger_reasons(readings):
         return []
     speed_drop, _, accel_spike, gyro_spike, seconds_stopped, loc_change, speed_before, _ = feat
     reasons = []
+    if gyro_spike >= 50 and accel_spike >= 10:
+        reasons.append('high_impact')
     if speed_before >= 1 and speed_drop >= 1:
         reasons.append('speed_drop')
     if accel_spike >= 5:
@@ -31,8 +33,6 @@ def _get_trigger_reasons(readings):
         reasons.append('gyro_spike')
     if seconds_stopped >= 10:
         reasons.append('stopped_10s')
-    if loc_change < 30:
-        reasons.append('same_location')
     return reasons
 
 
@@ -72,7 +72,7 @@ def submit_readings():
         )
 
         readings = SensorReadingModel.get_recent_for_user(sensor_bp.db, user_id)
-        if len(readings) < 3:
+        if len(readings) < 1:
             return jsonify({'message': 'Reading saved', 'accident_detected': False}), 200
 
         is_accident, prob = predict(readings)
