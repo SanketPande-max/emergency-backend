@@ -75,6 +75,6 @@ def cleanup_on_startup():
 cleanup_on_startup()
 
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
+    port = int(os.getenv('PORT', 10000))
     debug = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
     app.run(debug=debug, host='0.0.0.0', port=port)
