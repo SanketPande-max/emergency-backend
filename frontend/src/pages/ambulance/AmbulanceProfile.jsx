@@ -49,6 +49,12 @@ export default function AmbulanceProfile() {
         ambulance_type: ambulanceType,
       });
       setMessage('Profile updated successfully');
+      // Check if profile is now complete and redirect to dashboard
+      if (name && age && dob && gender && vehicleNumber && drivingLicense) {
+        setTimeout(() => {
+          window.location.href = '/ambulance/dashboard';
+        }, 1000);
+      }
     } catch (err) {
       setMessage(err.response?.data?.error || 'Update failed');
     } finally {

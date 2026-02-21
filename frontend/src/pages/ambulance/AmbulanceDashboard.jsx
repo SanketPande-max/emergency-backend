@@ -299,7 +299,13 @@ export default function AmbulanceDashboard() {
         <div className="status-row">
           <span className={`badge badge-${status}`}>{status}</span>
         </div>
-        {location && <p className="success-msg">Location: {location.lat.toFixed(4)}, {location.lng.toFixed(4)} (Auto-updating)</p>}
+        <p className="card-desc">Allow browser location or select manually on the map</p>
+        <button className="btn btn-secondary" onClick={tryGeolocation} disabled={loading} style={{ marginBottom: '0.5rem' }}>
+          {loading ? 'Getting location…' : 'Allow & Update Location'}
+        </button>
+        {location && (
+          <p className="success-msg">Location set: {location.lat.toFixed(4)}, {location.lng.toFixed(4)} {status === 'active' ? '(Auto-updating)' : ''}</p>
+        )}
         {showMapPicker && (
           <div className="map-picker-wrapper">
             <MapPicker initialCenter={location} onSelect={updateLocationWithCoords} height={260} />

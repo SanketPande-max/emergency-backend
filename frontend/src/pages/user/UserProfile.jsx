@@ -40,6 +40,12 @@ export default function UserProfile() {
       if (accidentDetectionEnabled) sensorService.start();
       else sensorService.stop();
       setMessage('Profile updated successfully');
+      // Check if profile is now complete and redirect to dashboard
+      if (name && dob && gender) {
+        setTimeout(() => {
+          window.location.href = '/user/dashboard';
+        }, 1000);
+      }
     } catch (err) {
       setMessage(err.response?.data?.error || 'Update failed');
     } finally {

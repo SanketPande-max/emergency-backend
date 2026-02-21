@@ -36,8 +36,13 @@ export default function AmbulanceLogin() {
       const normalized = phone.replace(/\D/g, '').slice(-10);
       const payload = normalized.length === 10 ? `+91${normalized}` : phone;
       const { data } = await ambulanceApi.verifyOtp(payload, otp);
-      loginAmbulance({ token: data.token, ambulance_id: data.ambulance_id });
-      navigate('/ambulance/dashboard');
+      loginAmbulance({ token: data.token, ambulance_id: data.ambulance_id, profile_completed: data.profile_completed });
+      // Redirect to profile if not completed, otherwise to dashboard
+      if (!data.profile_completed) {
+        navigate('/ambulance/profile');
+      } else {
+        navigate('/ambulance/dashboard');
+      }
     } catch (err) {
       setError(err.response?.data?.error || 'Invalid or expired OTP');
     } finally {
