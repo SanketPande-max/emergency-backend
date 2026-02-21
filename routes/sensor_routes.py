@@ -23,15 +23,15 @@ def _get_trigger_reasons(readings):
         return []
     speed_drop, _, accel_spike, gyro_spike, seconds_stopped, loc_change, speed_before, _ = feat
     reasons = []
-    if speed_before >= 20 and speed_drop >= 25:
+    if speed_before >= 1 and speed_drop >= 1:
         reasons.append('speed_drop')
-    if accel_spike >= 12:
+    if accel_spike >= 5:
         reasons.append('accel_spike')
-    if gyro_spike >= 3:
+    if gyro_spike >= 15:
         reasons.append('gyro_spike')
-    if seconds_stopped >= 15:
-        reasons.append('stopped_15s')
-    if loc_change < 20 and seconds_stopped >= 15:
+    if seconds_stopped >= 10:
+        reasons.append('stopped_10s')
+    if loc_change < 30:
         reasons.append('same_location')
     return reasons
 
@@ -46,7 +46,7 @@ def init_sensor_routes(app, db):
 @role_required('user')
 def submit_readings():
     """
-    Submit sensor data. If accident detected and user has no pending alert, create alert and start verification.
+    Submit sensor data. If accident detected, create request and assign ambulance (no verification calls).
     """
     try:
         user_id = get_jwt_identity()
@@ -72,7 +72,7 @@ def submit_readings():
         )
 
         readings = SensorReadingModel.get_recent_for_user(sensor_bp.db, user_id)
-        if len(readings) < 5:
+        if len(readings) < 3:
             return jsonify({'message': 'Reading saved', 'accident_detected': False}), 200
 
         is_accident, prob = predict(readings)
@@ -82,37 +82,35 @@ def submit_readings():
         if UserModel.is_blacklisted(sensor_bp.db, user_id):
             return jsonify({'error': 'Account blacklisted'}), 403
 
-        if AccidentAlertModel.get_pending_for_user(sensor_bp.db, user_id):
-            return jsonify({'message': 'Verification already in progress', 'accident_detected': True}), 200
-
         from datetime import timedelta
+        from bson import ObjectId
         from utils.time_utils import get_ist_now_naive
-        recent_alert = sensor_bp.db.accident_alerts.find_one({
-            'user_id': user['_id'],
+        recent = sensor_bp.db.requests.find_one({
+            'user_id': ObjectId(user_id),
+            'source': 'auto_detected',
+            'status': {'$in': ['pending', 'assigned', 'to_hospital']},
             'created_at': {'$gte': get_ist_now_naive() - timedelta(seconds=ALERT_COOLDOWN_SECONDS)}
         })
-        if recent_alert:
+        if recent:
             return jsonify({'message': 'Cooldown active', 'accident_detected': True}), 200
 
+        # No verification calls - directly create request and assign ambulance
         reasons = _get_trigger_reasons(readings)
-        alert_id = AccidentAlertModel.create(sensor_bp.db, user_id, lat, lng, trigger_reasons=reasons)
+        request_id = RequestModel.create_request(sensor_bp.db, user_id, lat, lng, source='auto_detected')
+        UserModel.update_location(sensor_bp.db, user_id, lat, lng)
 
-        from utils.verification_calls import place_verification_call
-        import os
-        base_url = os.getenv('TWILIO_VOICE_WEBHOOK_BASE', 'http://localhost:5000')
-        ok, call_sid, err = place_verification_call(user['phone'], base_url, alert_id, 1)
-        if not ok:
-            AccidentAlertModel.mark_false_positive(sensor_bp.db, alert_id)
-            return jsonify({'error': f'Verification call failed: {err}'}), 500
-
-        AccidentAlertModel.add_verification_call(sensor_bp.db, alert_id, call_sid, False)
+        ambulances = AmbulanceModel.get_all_with_location(sensor_bp.db, exclude_assigned=True)
+        nearest = find_nearest_ambulance(ambulances, lat, lng, prefer_active=True)
+        if nearest:
+            RequestModel.assign_ambulance(sensor_bp.db, str(request_id), str(nearest['_id']))
 
         return jsonify({
-            'message': 'Potential accident detected. Verification call placed.',
+            'message': 'Accident detected. Emergency request created and ambulance assigned.',
             'accident_detected': True,
-            'alert_id': alert_id,
-            'verification_started': True,
-        }), 200
+            'request_id': str(request_id),
+            'ambulance_assigned': bool(nearest),
+            'trigger_reasons': reasons,
+        }), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
