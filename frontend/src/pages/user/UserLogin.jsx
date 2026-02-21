@@ -36,8 +36,13 @@ export default function UserLogin() {
       const normalized = phone.replace(/\D/g, '').slice(-10);
       const payload = normalized.length === 10 ? `+91${normalized}` : phone;
       const { data } = await userApi.verifyOtp(payload, otp);
-      loginUser({ token: data.token, user_id: data.user_id });
-      navigate('/user/dashboard');
+      loginUser({ token: data.token, user_id: data.user_id, profile_completed: data.profile_completed });
+      // Redirect to profile if not completed, otherwise to dashboard
+      if (!data.profile_completed) {
+        navigate('/user/profile');
+      } else {
+        navigate('/user/dashboard');
+      }
     } catch (err) {
       setError(err.response?.data?.error || 'Invalid or expired OTP');
     } finally {
