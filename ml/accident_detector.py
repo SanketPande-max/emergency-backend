@@ -86,24 +86,21 @@ def extract_features(readings):
     return [speed_drop, speed_drop_rate, accel_spike, gyro_spike, seconds_stopped, location_change_m, max_speed, min_speed]
 
 def rule_based_predict(readings):
-    """
-    Demo/simulation: Path 1 = shake sharply + stop 10s. Path 2 = high impact. Path 3 = full.
-    """
     feat = extract_features(readings)
     if feat is None:
         return False, 0.0
+
     speed_drop, _, accel_spike, gyro_spike, seconds_stopped, loc_change, speed_before, _ = feat
-    # Path 1 (demo): Shake sharply + stop for 10 sec - accel above gravity, stayed in place
-    if accel_spike >= 11 and seconds_stopped >= 10 and loc_change < 50:
-        return True, 0.9
-    # Path 2: Very high gyro + accel = strong impact/rotation
-    if gyro_spike >= 50 and accel_spike >= 10:
-        return True, 0.9
-    # Path 3: Full conditions - movement, drop, spikes, stopped 10+ sec
-    if speed_before >= 1 and speed_drop >= 1 and accel_spike >= 5 and gyro_spike >= 15 and seconds_stopped >= 10:
-        return True, 0.9
-    if gyro_spike >= 18 and accel_spike >= 5 and seconds_stopped >= 10 and loc_change < 30:
-        return True, 0.75
+
+    # Step 1: Strong shake + rotation
+    strong_motion = accel_spike >= 8 and gyro_spike >= 20
+
+    # Step 2: Phone stopped for 5 seconds
+    stopped_after = seconds_stopped >= 5 and loc_change < 20
+
+    if strong_motion and stopped_after:
+        return True, 0.98
+
     return False, 0.0
 
 def predict(readings):
