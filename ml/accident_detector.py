@@ -78,7 +78,8 @@ def extract_features(readings):
     else:
         location_change_m = 0
 
-    if location_change_m < 10 and window_span >= 15:
+    # Stopped: little movement + enough time elapsed
+    if location_change_m < 30 and window_span >= 10:
         seconds_stopped = window_span
     else:
         seconds_stopped = 0
@@ -87,20 +88,22 @@ def extract_features(readings):
 
 def rule_based_predict(readings):
     """
-    Rule-based fallback: accident if speed_drop > 25, accel_spike > 12, gyro_spike > 3, stopped >= 15s
+    Manual/walking test thresholds (from real sensor data: speed~2.3, accel~8.8, gyro~42).
+    Triggers: some movement, speed drop, accel spike, gyro spike, stopped 10+ sec.
     """
     feat = extract_features(readings)
     if feat is None:
         return False, 0.0
     speed_drop, _, accel_spike, gyro_spike, seconds_stopped, loc_change, speed_before, _ = feat
-    # Only trigger if was moving (speed > 20 km/h)
-    if speed_before < 20:
+    # Was moving (walking ~2+ km/h or more)
+    if speed_before < 1:
         return False, 0.0
-    if speed_drop >= 25 and accel_spike >= 12 and gyro_spike >= 3 and seconds_stopped >= 15:
+    # Conditions from manual test: speed drop, accel >= 5, gyro >= 15, stopped >= 10s
+    if speed_drop >= 1 and accel_spike >= 5 and gyro_spike >= 15 and seconds_stopped >= 10:
         return True, 0.9
-    # Softer rules for edge cases
-    if speed_drop >= 30 and seconds_stopped >= 20 and loc_change < 20:
-        return True, 0.7
+    # Softer: high gyro + accel + stopped
+    if gyro_spike >= 18 and accel_spike >= 5 and seconds_stopped >= 10 and loc_change < 30:
+        return True, 0.75
     return False, 0.0
 
 def predict(readings):
