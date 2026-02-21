@@ -51,6 +51,38 @@ def generate_synthetic_accident_sample():
         speed_after,
     ]
 
+def generate_synthetic_shake_stop_sample():
+    """Generate one shake-at-standstill sample: phone shaken hard then stopped.
+    Speed is ~0 (person standing/sitting), high accel, moderate gyro, stopped 10-60s.
+    This represents the demo scenario where user shakes phone and places it down.
+    """
+    # Person is stationary - speed is near zero
+    speed_before = random.uniform(0, 3)
+    speed_after = random.uniform(0, 2)
+    speed_drop = max(0, speed_before - speed_after)
+    speed_drop_rate = speed_drop / 2
+
+    # High accelerometer from shaking (above gravity ~9.8)
+    accel_spike = random.uniform(10, 35)
+
+    # Moderate gyroscope from rotation during shake
+    gyro_spike = random.uniform(5, 40)
+
+    # Phone stopped after shake for 10-60 sec
+    seconds_stopped = random.uniform(10, 60)
+    location_change_m = random.uniform(0, 10)  # person barely moves
+
+    return [
+        speed_drop,
+        speed_drop_rate,
+        accel_spike,
+        gyro_spike,
+        seconds_stopped,
+        location_change_m,
+        speed_before,
+        speed_after,
+    ]
+
 def generate_synthetic_normal_sample():
     """Generate one normal driving sample: gradual changes, no impact."""
     # Normal speed variation
@@ -65,7 +97,7 @@ def generate_synthetic_normal_sample():
     gyro_spike = random.uniform(0, 2)
 
     # Either moving or short stop
-    seconds_stopped = random.uniform(0, 10)
+    seconds_stopped = random.uniform(0, 8)
     location_change_m = random.uniform(0, 500)
 
     return [
@@ -79,8 +111,8 @@ def generate_synthetic_normal_sample():
         max(0, speed + speed_drop),
     ]
 
-def train_and_save(n_accidents=2000, n_normal=4000):
-    """Generate synthetic data, train model, save to joblib."""
+def train_and_save(n_accidents=2000, n_shake_stop=1500, n_normal=4000):
+    """Generate synthetic data including shake-stop samples, train model, save to joblib."""
     try:
         import joblib
         from sklearn.ensemble import RandomForestClassifier
@@ -90,10 +122,12 @@ def train_and_save(n_accidents=2000, n_normal=4000):
         raise
 
     X_acc = [generate_synthetic_accident_sample() for _ in range(n_accidents)]
+    X_shake = [generate_synthetic_shake_stop_sample() for _ in range(n_shake_stop)]
     X_norm = [generate_synthetic_normal_sample() for _ in range(n_normal)]
 
-    X = np.array(X_acc + X_norm)
-    y = np.array([1] * n_accidents + [0] * n_normal)
+    # Both vehicle accidents and shake-stop are labeled as accident (1)
+    X = np.array(X_acc + X_shake + X_norm)
+    y = np.array([1] * n_accidents + [1] * n_shake_stop + [0] * n_normal)
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
