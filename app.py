@@ -13,7 +13,6 @@ from routes.user_routes import init_user_routes
 from routes.ambulance_routes import init_ambulance_routes
 from routes.admin_routes import init_admin_routes
 from routes.sensor_routes import init_sensor_routes
-from routes.accident_webhook_routes import init_accident_webhook_routes
 from models.otp_model import OTPModel
 
 app = Flask(__name__)
