@@ -33,7 +33,6 @@ init_user_routes(app, mongo.db)
 init_ambulance_routes(app, mongo.db)
 init_admin_routes(app, mongo.db)
 init_sensor_routes(app, mongo.db)
-init_accident_webhook_routes(app, mongo.db)
 
 @app.route('/', methods=['GET'])
 def health_check():
