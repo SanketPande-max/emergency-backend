@@ -11,7 +11,7 @@
  */
 import { submitSensorReading } from '../api/sensorApi';
 
-const SEND_INTERVAL_MS = 3000;  // Send every 3s (was 5s) for faster detection
+const SEND_INTERVAL_MS = 5000;  // Send every 5s
 const ACCEL_SCALE = 1;   // m/s²
 const GYRO_SCALE = 1;    // deg/s
 
