@@ -9,7 +9,6 @@ from models.ambulance_model import AmbulanceModel
 from utils.auth import role_required
 from utils.distance import find_nearest_ambulance
 from ml.accident_detector import predict, extract_features
-from config import Config
 
 sensor_bp = Blueprint('sensor', __name__)
 
@@ -109,48 +108,27 @@ def submit_readings():
         if recent:
             return jsonify({'message': 'Cooldown active', 'accident_detected': True}), 200
 
-        # Check if there's already a pending alert for verification
-        pending_alert = AccidentAlertModel.get_pending_for_user(sensor_bp.db, user_id)
-        if pending_alert:
-            return jsonify({
-                'message': 'Verification call in progress',
-                'accident_detected': True,
-                'alert_id': str(pending_alert['_id'])
-            }), 200
-
-        # Create accident alert and place verification call
+        # No verification calls - directly create request and assign ambulance
         reasons = _get_trigger_reasons(readings)
         if shake_stop_flag:
             reasons.append('shake_stop_detected_by_frontend')
 
-        alert_id = AccidentAlertModel.create(sensor_bp.db, user_id, lat, lng, trigger_reasons=reasons)
+        request_id = RequestModel.create_request(sensor_bp.db, user_id, lat, lng, source='auto_detected')
         UserModel.update_location(sensor_bp.db, user_id, lat, lng)
 
-        # Place verification call to user
-        import os
-        from utils.verification_calls import place_verification_call
-        from bson import ObjectId
-        base_url = os.getenv('TWILIO_VOICE_WEBHOOK_BASE', Config.TWILIO_VOICE_WEBHOOK_BASE)
-        user_phone = user.get('phone')
-        
-        call_placed = False
-        if user_phone and base_url and base_url != 'http://localhost:5000':
-            ok, call_sid, error = place_verification_call(user_phone, base_url, alert_id, call_index=1)
-            if ok:
-                call_placed = True
-                AccidentAlertModel.add_verification_call(sensor_bp.db, alert_id, call_sid, False)
-            else:
-                # If call fails, proceed with emergency (safety first)
-                _confirm_accident_and_dispatch(sensor_bp.db, alert_id, {'user_id': ObjectId(user_id), 'location': {'lat': lat, 'lng': lng}})
-        else:
-            # If Twilio not configured or no phone, proceed with emergency (safety first)
-            _confirm_accident_and_dispatch(sensor_bp.db, alert_id, {'user_id': ObjectId(user_id), 'location': {'lat': lat, 'lng': lng}})
+        # Clean up old sensor readings after emergency is created
+        SensorReadingModel.cleanup_old(sensor_bp.db, max_age_seconds=10)
+
+        ambulances = AmbulanceModel.get_all_with_location(sensor_bp.db, exclude_assigned=True)
+        nearest = find_nearest_ambulance(ambulances, lat, lng, prefer_active=True)
+        if nearest:
+            RequestModel.assign_ambulance(sensor_bp.db, str(request_id), str(nearest['_id']))
 
         return jsonify({
-            'message': 'Accident detected. Verification call placed.' if call_placed else 'Accident detected. Emergency request created.',
+            'message': 'Accident detected. Emergency request created and ambulance assigned.',
             'accident_detected': True,
-            'alert_id': alert_id,
-            'verification_call_placed': call_placed,
+            'request_id': str(request_id),
+            'ambulance_assigned': bool(nearest),
             'trigger_reasons': reasons,
         }), 201
     except Exception as e:
